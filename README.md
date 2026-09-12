@@ -88,25 +88,35 @@ and TPV is proprietary. **Do not publish a built image** — see `LICENSE`.
 
 ## Known issues
 
-### Your kernel may break BLE scanning entirely
+### BLE scanning can stop finding anything — intermittently
 
-This cost hours. On Fedora 44 with **kernel 7.1.8-200.fc44**, BLE scanning on an
-Intel AX211 silently finds almost nothing, while Bluetooth **Classic** keeps
-working perfectly. Mouse, keyboard and headphones behave, so the adapter looks
-healthy — but no trainer will ever be found.
+This cost hours, and the cause is **still not pinned down**. On an Intel AX211,
+BLE discovery can silently return almost nothing while Bluetooth **Classic**
+keeps working perfectly. Mouse, keyboard and headphones behave, so the adapter
+looks healthy — but no trainer will ever be found.
 
-Booting **kernel 7.1.4-200.fc44** fixed it immediately: the same 34-second scan
-went from 1 device to the trainer at −71 dBm.
-
-If your trainer is invisible, test this before suspecting your hardware:
+Symptom check:
 
 ```bash
 bluetoothctl --timeout 30 scan on | grep -c Device   # near-zero is the symptom
 ```
 
-Then boot an older kernel and repeat. See
-[issue #1](https://github.com/BenA-SA/tpv-linux-container/issues/1) for the full
-diagnosis.
+What we know: it is **intermittent and state-dependent**, not a property of any
+one kernel. A machine that failed repeatedly on 7.1.8-200.fc44 later scanned
+fine on that same kernel after a clean reboot. Suspect triggers, none confirmed:
+long uptime, connection churn, suspend/resume, or power-cycling the adapter.
+
+Things worth trying, cheapest first:
+
+1. Disable USB autosuspend on the adapter (see below) — a real and separate bug.
+2. Reboot. A clean boot has restored it in our testing.
+3. Try an older kernel. This helped once, but a single observation either way
+   proves little given the intermittency.
+
+[Issue #1](https://github.com/BenA-SA/tpv-linux-container/issues/1) carries the
+full investigation, including a code-level suspect
+(`e4053143e7dc`, a discovery-state race that would present intermittently) and
+the tooling to capture evidence if you hit it.
 
 ### USB autosuspend powers the radio down
 
