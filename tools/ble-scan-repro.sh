@@ -85,12 +85,20 @@ COUNT=$(wc -l < "$OUT/devices-seen.txt")
 } > "$OUT/summary.txt" 2>&1
 
 echo
-echo "=== RESULT: $COUNT distinct devices in ${SCAN_SECONDS}s ==="
+echo "=== RESULT ==="
+echo "distinct devices in ${SCAN_SECONDS}s: $COUNT"
+echo "   (this count is the robust metric - a broken scan sees near-zero)"
 if [ -n "$TARGET" ]; then
   if grep -qi "$TARGET" "$OUT/scan-raw.txt"; then
-    echo "=== expected device '$TARGET' WAS seen ==="
+    RSSI=$(grep -i -A0 "$TARGET" "$OUT/scan-raw.txt" | grep -oE 'RSSI: .*' | tail -1)
+    echo "expected device '$TARGET': SEEN ${RSSI:+($RSSI)}"
   else
-    echo "=== expected device '$TARGET' was NOT seen  <-- reproduces the bug ==="
+    echo "expected device '$TARGET': NOT SEEN"
+    echo
+    echo "   Absence only means something if this device is KNOWN to be in range."
+    echo "   Verify it on a good kernel first, and keep it next to the adapter."
+    echo "   A device that is merely asleep or out of range gives the same answer"
+    echo "   for the wrong reason."
   fi
 fi
 

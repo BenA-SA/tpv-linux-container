@@ -30,6 +30,27 @@ It installs a udev rule granting your login session access to the adapter
 Downloads the Fedora Cloud base image, grows it, and seeds cloud-init with an
 SSH key plus `bluez` and the capture tooling.
 
+## Choosing a test target
+
+The scan needs something that is definitely advertising, because on a broken
+kernel "not seen" and "not in range" look identical. Pick a **small BLE device
+you can keep next to the adapter**, not the trainer:
+
+```bash
+TARGET="Zwift Click" ./test-kernel.sh 7.1.5-201.fc44
+```
+
+A Zwift Click, a heart-rate strap or any BLE sensor works, and beats a trainer
+for this: it is portable, so you can test indoors, and it wakes on a button press
+rather than needing the flywheel spun every 15 minutes.
+
+Verify your chosen target is visible on a **known-good kernel first**. Its
+absence proves nothing otherwise.
+
+The harness also reports the **total distinct device count**, which is the more
+robust signal — a working scan in a normal house sees several devices, a broken
+one sees near-zero regardless of what you were aiming at.
+
 ## Test a kernel
 
 ```bash
