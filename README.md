@@ -46,6 +46,9 @@ cd tpv-linux-container
 podman build -f Containerfile.full -t localhost/tpv-full:debian .
 ```
 
+Nothing needs to be prebuilt on the host: both Containerfiles compile QZ
+themselves from a pinned upstream commit, so a fresh clone is all you need.
+
 Roughly 6.6 GB and 20–40 minutes. It compiles QZ from a pinned commit, installs
 Wine 11.0 with DXVK and VKD3D-Proton, and runs the TPV installer silently under a
 headless X server.
@@ -153,11 +156,11 @@ it to the trainer. Set `QZ_HR_BELT` and pair `Wahoo HRM` in TPV explicitly.
 |---|---|
 | `Containerfile.full` | TPV + QZ in one image — the one you want |
 | `Containerfile.debian` | QZ only, built from source (bridge on a separate host) |
-| `Containerfile` | Earlier Fedora variant, copies in a host-built binary |
 | `patches/` | The QZ root-guard patch, published as GPL requires |
 | `scripts/entrypoint.sh` | Mode dispatch, prefix seeding, QZ + TPV startup |
 | `scripts/build-prefix.sh` | Builds the template Wine prefix at image build time |
 | `run-tpv.sh` | GPU, display and audio wiring for the combined image |
+| `run-qz-debian.sh` | Runs the QZ-only image |
 | `verify.sh` | End-to-end proof the bridge works |
 
 ## Why each podman flag is load-bearing
