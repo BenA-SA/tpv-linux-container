@@ -1,0 +1,189 @@
+# TrainingPeaks Virtual on Linux, in a container
+
+TrainingPeaks Virtual (TPV) has no Linux build. This repository builds it — plus
+the bridge that gets your trainer into it — as a single rootless **podman** image.
+
+**Verified working end to end on 2026-09-12**: a Wahoo KICKR CORE over BLE, into
+[qdomyos-zwift](https://github.com/cagnulein/qdomyos-zwift) (QZ), re-presented as a
+Wahoo Direct Connect device over TCP, consumed by TPV running under Wine — with
+resistance commands flowing back down to the trainer.
+
+```
+KICKR CORE ──BLE──► QZ ──DIRCON (TCP 36866/36867 + mDNS)──► TPV under Wine
+     ▲                                                          │
+     └────────────── FTMS resistance / gradient ────────────────┘
+```
+
+## Why a bridge at all
+
+Wine cannot do Bluetooth Low Energy. Its WinRT `BluetoothLEAdvertisementWatcher`
+is a stub, so a Windows app under Wine cannot talk to a BLE trainer. This is what
+blocks Zwift on Linux.
+
+TPV is a much easier target because it supports **Direct Connect (DIRCON)**
+natively — trainer data over plain TCP, discovered by mDNS. Both are ordinary
+networking that Wine passes straight through to the host. QZ holds the trainer
+over BLE on the Linux side and re-presents it as a Wahoo DIRCON device, so TPV
+never needs Bluetooth at all.
+
+TPV also ships keyboard virtual shifting (`+` / `-`), so a Zwift Click or similar
+proprietary controller is not required either.
+
+## Requirements
+
+- Linux with podman (rootless), an x86_64 host
+- A working BLE adapter — **see [Known issues](#known-issues)**, this bit bites
+- A GPU that can present a Vulkan swapchain (see the GPU note below)
+- An active graphical session. Wine needs a compositor; without one TPV dies with
+  `nodrv_CreateWindow ... The explorer process failed to start`
+- A DIRCON-capable trainer, or any BLE trainer QZ supports
+
+## Build
+
+```bash
+git clone https://github.com/BenA-SA/tpv-linux-container.git
+cd tpv-linux-container
+podman build -f Containerfile.full -t localhost/tpv-full:debian .
+```
+
+Roughly 6.6 GB and 20–40 minutes. It compiles QZ from a pinned commit, installs
+Wine 11.0 with DXVK and VKD3D-Proton, and runs the TPV installer silently under a
+headless X server.
+
+## Run
+
+```bash
+./run-tpv.sh            # QZ, wait for DIRCON, then TPV
+./run-tpv.sh qz         # bridge only (headless, no display needed)
+./run-tpv.sh tpv        # TPV only
+./run-tpv.sh shell      # poke around inside
+./verify.sh             # prove the bridge actually works
+```
+
+Configure via environment:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `QZ_TRAINER` | `KICKR CORE AE08` | BLE name of your trainer |
+| `QZ_HR_BELT` | `TRACKR HR 7DC2` | BLE name of your HR strap |
+| `TPV_GPU` | `auto` | `intel`, `nvidia`, `none` |
+| `STATE` | `~/.local/share/tpv-full` | Where the Wine prefix and game data live |
+
+`verify.sh` checks the five things that actually matter: the Bluetooth backend
+chosen, the trainer connection, the DIRCON listeners, whether the mDNS advert
+carries a reachable host address, and whether the ports emit real DIRCON frames
+rather than merely accepting sockets.
+
+## State and updates
+
+The image carries a **template** Wine prefix. First run copies it to
+`$STATE/wineprefix`, so your TPV login, settings and the ~1.1 GB of downloaded
+game data survive rebuilding the image.
+
+Game data is deliberately not baked in: TPV's launcher owns it and self-updates,
+and TPV is proprietary. **Do not publish a built image** — see `LICENSE`.
+
+## Known issues
+
+### Your kernel may break BLE scanning entirely
+
+This cost hours. On Fedora 44 with **kernel 7.1.8-200.fc44**, BLE scanning on an
+Intel AX211 silently finds almost nothing, while Bluetooth **Classic** keeps
+working perfectly. Mouse, keyboard and headphones behave, so the adapter looks
+healthy — but no trainer will ever be found.
+
+Booting **kernel 7.1.4-200.fc44** fixed it immediately: the same 34-second scan
+went from 1 device to the trainer at −71 dBm.
+
+If your trainer is invisible, test this before suspecting your hardware:
+
+```bash
+bluetoothctl --timeout 30 scan on | grep -c Device   # near-zero is the symptom
+```
+
+Then boot an older kernel and repeat. See
+[issue #1](https://github.com/BenA-SA/tpv-linux-container/issues/1) for the full
+diagnosis.
+
+### USB autosuspend powers the radio down
+
+Intel Bluetooth is a USB device and autosuspend may suspend it after 2 seconds,
+which makes scanning unreliable and can leave the adapter reporting
+`Powered: no` or scans failing with `org.bluez.Error.NotReady`:
+
+```bash
+echo on | sudo tee /sys/bus/usb/devices/<n-n>/power/control
+```
+
+Find `<n-n>` by matching `idVendor` `8087` under `/sys/bus/usb/devices/`.
+
+### Discrete GPUs may not be able to present
+
+On a hybrid laptop the dGPU often has no display outputs, so Vulkan swapchain
+creation fails with `Failed to query present modes: -13` (`VK_ERROR_UNKNOWN`)
+even though the GPU renders fine. Passing `/dev/dri` alongside it is **not**
+enough. Use the integrated GPU: `TPV_GPU=intel` (the default).
+
+### TPV refuses to launch its own game binary
+
+Running `InstallData-Win/TPVirtual.exe` directly produces *"must be launched using
+the TPVirtual-Launcher"*. The launcher is the only supported entry point, and it
+**exits after handing off to the game** — so the entrypoint waits on
+`wineserver -w` rather than exec'ing the launcher, otherwise the container would
+take the game down with it.
+
+### Stopping QZ does not release the trainer
+
+BlueZ keeps the connection (`Connected: yes`, `Paired: no`) after QZ exits, and a
+connected BLE device stops advertising — so another machine cannot see it:
+
+```bash
+bluetoothctl disconnect <trainer-mac>
+```
+
+### Heart rate appears to come from the trainer
+
+If `heart_rate_belt_name` is unset, QZ binds no HR sensor and TPV falls back to
+the optional heart-rate field inside FTMS Indoor Bike Data (`0x2AD2`), attributing
+it to the trainer. Set `QZ_HR_BELT` and pair `Wahoo HRM` in TPV explicitly.
+
+## Files
+
+| Path | Purpose |
+|---|---|
+| `Containerfile.full` | TPV + QZ in one image — the one you want |
+| `Containerfile.debian` | QZ only, built from source (bridge on a separate host) |
+| `Containerfile` | Earlier Fedora variant, copies in a host-built binary |
+| `patches/` | The QZ root-guard patch, published as GPL requires |
+| `scripts/entrypoint.sh` | Mode dispatch, prefix seeding, QZ + TPV startup |
+| `scripts/build-prefix.sh` | Builds the template Wine prefix at image build time |
+| `run-tpv.sh` | GPU, display and audio wiring for the combined image |
+| `verify.sh` | End-to-end proof the bridge works |
+
+## Why each podman flag is load-bearing
+
+| Flag | Without it |
+|---|---|
+| `--userns=keep-id` | Container uid is 0 in its userns, so libdbus `EXTERNAL` auth claims uid 0 while the bus sees the real peer uid via `SO_PEERCRED`. Auth hangs: `Did not receive a reply` |
+| `--security-opt label=disable` | SELinux blocks the host D-Bus socket: `Permission denied`. `:z` cannot work — relabelling the host socket is `operation not permitted` |
+| `--network=host` | DIRCON binds the container netns, so the mDNS advert carries an address TPV cannot reach |
+| writable `HOME` and workdir | QZ spins on failed debug-log writes and never gets past discovery. Looks like a hang |
+| D-Bus socket mount | No BlueZ at all: `Cannot find a running Bluez` |
+| Avahi socket mount | No mDNS advert, so TPV never discovers the bridge |
+| `BLUETOOTH_FORCE_DBUS_LE_VERSION` | Qt probes bluetoothd's version by executing its path *inside* the container, where it is absent; the `"4.0"` fallback selects a legacy raw-L2CAP backend that cannot connect |
+
+QZ needs **no root**. Its upstream `getuid()` guard predates QZ reaching BlueZ
+over D-Bus; `patches/` removes it. Capabilities cannot satisfy a `getuid()`
+check, which is why a patch rather than `--cap-add` is required.
+
+## Scope
+
+This is packaging, not sandboxing. Host networking, host D-Bus and host Avahi mean
+the container is tightly coupled to the host. What it removes is installing a Qt5
+build environment, compiling QZ, and assembling a working Wine prefix by hand.
+
+## Credits
+
+[qdomyos-zwift](https://github.com/cagnulein/qdomyos-zwift) by Roberto Viola does
+the actual work of speaking to trainers. The container approach follows the
+pattern set by [netbrain/zwift](https://github.com/netbrain/zwift).

@@ -1,0 +1,108 @@
+# TPV + QZ in one image: Wine 11.0 + DXVK + VKD3D-Proton for TrainingPeaks
+# Virtual, and qdomyos-zwift as the DIRCON bridge that feeds it the trainer.
+#
+# Stage 1 compiles QZ. Stage 2 adds Wine, the graphics translation layers, and
+# a template WINEPREFIX with the TPV launcher installed. TPV's game data is not
+# baked in: its launcher fetches and self-updates it, and TPV is proprietary and
+# must not be redistributed. First run populates a persistent volume instead.
+
+ARG DEBIAN_RELEASE=trixie
+
+# ---------------------------------------------------------------- stage 1: QZ
+FROM debian:${DEBIAN_RELEASE} AS qzbuild
+
+ARG QZ_REPO=https://github.com/cagnulein/qdomyos-zwift.git
+ARG QZ_COMMIT=446f37d8ecc0e011855629abea665a20a47de5bf
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential git ca-certificates \
+      qtbase5-dev qtbase5-private-dev qtconnectivity5-dev qtlocation5-dev \
+      qtmultimedia5-dev qtdeclarative5-dev qtquickcontrols2-5-dev \
+      qtpositioning5-dev \
+      libqt5charts5-dev libqt5networkauth5-dev libqt5svg5-dev \
+      libqt5texttospeech5-dev libqt5websockets5-dev libqt5sensors5-dev \
+      qttools5-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+RUN git init -q . \
+ && git remote add origin "${QZ_REPO}" \
+ && git fetch -q --depth 1 origin "${QZ_COMMIT}" \
+ && git checkout -q FETCH_HEAD \
+ && git submodule update -q --init --recursive --depth 1
+
+COPY patches/0001-allow-unprivileged-start.patch /tmp/
+RUN git apply --verbose /tmp/0001-allow-unprivileged-start.patch
+
+RUN mkdir -p /build && cd /build \
+ && qmake /src/src/qdomyos-zwift.pro CONFIG-=ltcg CONFIG-=optimize_full CONFIG+=release \
+ && make -j"$(nproc)"
+
+
+# ------------------------------------------------------- stage 2: Wine + TPV
+FROM debian:${DEBIAN_RELEASE} AS runtime
+
+ARG WINE_VERSION=11.0.0.0~trixie-1
+ARG DXVK_VERSION=3.1
+ARG VKD3D_VERSION=3.0.1
+ARG TPV_INSTALLER_URL=https://virtual.trainingpeaks.com/TPVirtual-Installer_v6.exe
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# The TPV installer is PE32, so WoW64 needs the i386 architecture enabled.
+RUN dpkg --add-architecture i386 \
+ && apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl gnupg tar zstd cabextract xvfb procps iproute2 \
+      libqt5bluetooth5 libqt5charts5 libqt5core5t64 libqt5dbus5 libqt5gui5 \
+      libqt5location5 libqt5multimedia5 libqt5network5 libqt5networkauth5 \
+      libqt5positioning5 libqt5qml5 libqt5quick5 libqt5sql5 libqt5sql5-sqlite \
+      libqt5texttospeech5 libqt5websockets5 libqt5widgets5 libqt5xml5 \
+      qml-module-qtquick2 \
+      libvulkan1 libvulkan1:i386 mesa-vulkan-drivers mesa-vulkan-drivers:i386 \
+      libgl1-mesa-dri libgl1-mesa-dri:i386 vulkan-tools \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /etc/apt/keyrings \
+ && curl -fsSL https://dl.winehq.org/wine-builds/winehq.key \
+      -o /etc/apt/keyrings/winehq-archive.key \
+ && echo "deb [signed-by=/etc/apt/keyrings/winehq-archive.key] https://dl.winehq.org/wine-builds/debian/ trixie main" \
+      > /etc/apt/sources.list.d/winehq.list \
+ && apt-get update \
+ && apt-get install -y --install-recommends "winehq-stable=${WINE_VERSION}" \
+ && rm -rf /var/lib/apt/lists/*
+
+# DXVK and VKD3D-Proton pinned to the versions proven in the Bottles setup.
+RUN curl -fsSL "https://github.com/doitsujin/dxvk/releases/download/v${DXVK_VERSION}/dxvk-${DXVK_VERSION}.tar.gz" \
+      | tar -xz -C /opt \
+ && curl -fsSL "https://github.com/HansKristian-Work/vkd3d-proton/releases/download/v${VKD3D_VERSION}/vkd3d-proton-${VKD3D_VERSION}.tar.zst" \
+      | tar --zstd -x -C /opt
+
+COPY --from=qzbuild /build/qdomyos-zwift /opt/qz/qdomyos-zwift
+
+# uid 1000 so podman --userns=keep-id maps the host user onto this account and
+# the prefix and volumes stay writable.
+RUN useradd -m -u 1000 -s /bin/bash tpv \
+ && mkdir -p /opt/tpv && chown tpv:tpv /opt/tpv
+COPY scripts/ /opt/scripts/
+RUN chmod +x /opt/scripts/*.sh
+
+USER tpv
+ENV WINEPREFIX=/opt/tpv/wine-template \
+    WINEARCH=win64 \
+    WINEDEBUG=-all \
+    WINEDLLOVERRIDES=mscoree,mshtml=
+RUN /opt/scripts/build-prefix.sh
+
+USER root
+RUN chown -R tpv:tpv /opt/tpv
+USER tpv
+
+# See README: Qt resolves bluetoothd's path from /proc then execs it inside the
+# container, where it is absent; the "4.0" fallback selects a raw-L2CAP backend
+# that cannot connect.
+ENV BLUETOOTH_FORCE_DBUS_LE_VERSION=5.42 \
+    TPV_HOME=/state
+
+ENTRYPOINT ["/opt/scripts/entrypoint.sh"]
+CMD ["both"]

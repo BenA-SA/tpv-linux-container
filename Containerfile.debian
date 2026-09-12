@@ -1,0 +1,64 @@
+# QZ (qdomyos-zwift) as a DIRCON bridge, built from source on Debian.
+#
+# Stage 1 compiles QZ against Qt5; stage 2 ships only the runtime libraries.
+# The pinned commit keeps the build reproducible; bump QZ_COMMIT deliberately
+# and re-test, since the root-guard patch is tied to a known source layout.
+
+ARG DEBIAN_RELEASE=trixie
+
+FROM debian:${DEBIAN_RELEASE} AS build
+
+ARG QZ_REPO=https://github.com/cagnulein/qdomyos-zwift.git
+ARG QZ_COMMIT=446f37d8ecc0e011855629abea665a20a47de5bf
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential git ca-certificates \
+      qtbase5-dev qtbase5-private-dev qtconnectivity5-dev qtlocation5-dev \
+      qtmultimedia5-dev qtdeclarative5-dev qtquickcontrols2-5-dev \
+      qtpositioning5-dev \
+      libqt5charts5-dev libqt5networkauth5-dev libqt5svg5-dev \
+      libqt5texttospeech5-dev libqt5websockets5-dev libqt5sensors5-dev \
+      qttools5-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+RUN git init -q . \
+ && git remote add origin "${QZ_REPO}" \
+ && git fetch -q --depth 1 origin "${QZ_COMMIT}" \
+ && git checkout -q FETCH_HEAD \
+ && git submodule update -q --init --recursive --depth 1
+
+# Legacy getuid() guard predates QZ reaching BlueZ over D-Bus, which needs no
+# root. Capabilities cannot satisfy a getuid() check, so it must be patched.
+COPY patches/0001-allow-unprivileged-start.patch /tmp/
+RUN git apply --verbose /tmp/0001-allow-unprivileged-start.patch
+
+# LTCG is slow and buys nothing for this workload.
+RUN mkdir -p /build && cd /build \
+ && qmake /src/src/qdomyos-zwift.pro CONFIG-=ltcg CONFIG-=optimize_full CONFIG+=release \
+ && make -j"$(nproc)"
+
+
+FROM debian:${DEBIAN_RELEASE}-slim AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libqt5bluetooth5 libqt5charts5 libqt5core5t64 libqt5dbus5 libqt5gui5 \
+      libqt5location5 libqt5multimedia5 libqt5network5 libqt5networkauth5 \
+      libqt5positioning5 libqt5qml5 libqt5quick5 libqt5sql5 libqt5sql5-sqlite \
+      libqt5texttospeech5 libqt5websockets5 libqt5widgets5 libqt5xml5 \
+      qml-module-qtquick2 \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /build/qdomyos-zwift /opt/qz/qdomyos-zwift
+
+# Skips Qt's bluetoothd version probe, which resolves the host daemon's path
+# from /proc and then execs it inside the container, where it is absent. The
+# fallback verdict ("4.0") silently selects the legacy raw-L2CAP ATT backend,
+# which cannot connect.
+ENV BLUETOOTH_FORCE_DBUS_LE_VERSION=5.42
+
+WORKDIR /opt/qz
+ENTRYPOINT ["/opt/qz/qdomyos-zwift"]
+CMD ["-no-gui", "-no-virtual-device-bluetooth"]

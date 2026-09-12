@@ -1,0 +1,12 @@
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -578,8 +578,7 @@
+ #ifndef Q_OS_ANDROID
+     if (getuid() && !testPeloton && !testHomeFitnessBudy && !testPowerZonePack && !smokeTest) {
+ 
+-        printf("Runme as root!\n");
+-        return -1;
++        printf("Running unprivileged: BlueZ is reached over D-Bus, root not required.\n");
+     } else
+         printf("%s", "OK, you are root.\n");
+ #endif

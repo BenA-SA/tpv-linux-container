@@ -1,0 +1,5 @@
+# Build artefact - Containerfile.full compiles this from pinned source
+qdomyos-zwift
+
+# Local build logs
+build-*.log
