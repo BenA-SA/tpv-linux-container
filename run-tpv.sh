@@ -62,8 +62,15 @@ if [ ${#DISPLAY_ARGS[@]} -eq 0 ]; then
   exit 1
 fi
 
+INHIBIT=()
+if [ "$MODE" != qz ] && command -v gnome-session-inhibit >/dev/null; then
+  INHIBIT=(gnome-session-inhibit --inhibit idle:suspend
+           --reason "TrainingPeaks Virtual running" --app-id tpv)
+  echo "==> screen blank/suspend inhibited while the container runs"
+fi
+
 podman rm -f tpv >/dev/null 2>&1 || true
-exec podman run --rm --name tpv \
+exec "${INHIBIT[@]}" podman run --rm --name tpv \
   --userns=keep-id \
   --security-opt label=disable \
   --network=host \
