@@ -84,6 +84,10 @@ if [ "$MODE" != qz ] && command -v gnome-session-inhibit >/dev/null; then
   echo "==> screen blank/suspend inhibited while the container runs"
 fi
 
+HUB=(-e "TPV_HOST_NAME=$(hostname -s)" -e "TPV_HUB_ADVERT=${TPV_HUB_ADVERT:-1}")
+[ -n "${TPV_HUB_ADDR:-}" ] && HUB+=(-e "TPV_HUB_ADDR=${TPV_HUB_ADDR}")
+[ -n "${TPV_HUB_NAME:-}" ] && HUB+=(-e "TPV_HUB_NAME=${TPV_HUB_NAME}")
+
 podman rm -f tpv >/dev/null 2>&1 || true
 exec "${INHIBIT[@]}" podman run --rm --name tpv \
   --userns=keep-id \
@@ -96,6 +100,7 @@ exec "${INHIBIT[@]}" podman run --rm --name tpv \
   -e "QZ_TRAINER=${TRAINER}" \
   -e "QZ_HR_BELT=${HR_BELT}" \
   -e "TPV_DIRECT=${TPV_DIRECT:-0}" \
+  "${HUB[@]}" \
   -v "$STATE:/state" \
   -v /run/dbus/system_bus_socket:/run/dbus/system_bus_socket \
   -v /var/run/avahi-daemon:/var/run/avahi-daemon \

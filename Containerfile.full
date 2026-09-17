@@ -54,6 +54,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN dpkg --add-architecture i386 \
  && apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl gnupg tar zstd cabextract xvfb procps iproute2 \
+      avahi-utils \
       libqt5bluetooth5 libqt5charts5 libqt5core5t64 libqt5dbus5 libqt5gui5 \
       libqt5location5 libqt5multimedia5 libqt5network5 libqt5networkauth5 \
       libqt5positioning5 libqt5qml5 libqt5quick5 libqt5sql5 libqt5sql5-sqlite \
