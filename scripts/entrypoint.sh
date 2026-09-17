@@ -68,9 +68,22 @@ wait_for_dircon() {
   echo "    WARNING: DIRCON never came up; TPV will find no trainer." >&2
 }
 
+sync_timezone() {
+  # Wine rewrites TimeZoneKeyName only on a prefix update, so a UTC-era prefix needs wineboot -u.
+  local marker="$WINEPREFIX/.tpv-timezone"
+  local current
+  current="${TZ:-}:$(cksum < /etc/localtime 2>/dev/null || true)"
+  [ -f "$marker" ] && [ "$(cat "$marker")" = "$current" ] && return 0
+  echo "==> timezone changed (${TZ:-/etc/localtime}); updating the Wine prefix"
+  wineboot -u >/dev/null 2>&1 || true
+  wineserver -w
+  printf '%s' "$current" > "$marker"
+}
+
 run_tpv() {
   seed_prefix
   ensure_tpv
+  sync_timezone
   # TPV refuses a direct launch of the game exe ("must be launched using the
   # TPVirtual-Launcher"), so the launcher is the only supported path. Do not
   # exec it: it hands off to the game and exits, which would take the

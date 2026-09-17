@@ -62,6 +62,12 @@ if [ ${#DISPLAY_ARGS[@]} -eq 0 ]; then
   exit 1
 fi
 
+TIMEZONE=()
+HOST_TZ="${TZ:-$(timedatectl show -p Timezone --value 2>/dev/null || true)}"
+[ -n "$HOST_TZ" ] && TIMEZONE+=(-e "TZ=${HOST_TZ}")
+[ -e /etc/localtime ] && TIMEZONE+=(-v /etc/localtime:/etc/localtime:ro)
+echo "==> timezone: ${HOST_TZ:-host /etc/localtime}"
+
 INHIBIT=()
 if [ "$MODE" != qz ] && command -v gnome-session-inhibit >/dev/null; then
   INHIBIT=(gnome-session-inhibit --inhibit idle:suspend
@@ -76,6 +82,7 @@ exec "${INHIBIT[@]}" podman run --rm --name tpv \
   --network=host \
   "${GPU[@]}" "${AUDIO[@]}" \
   "${DISPLAY_ARGS[@]}" \
+  "${TIMEZONE[@]}" \
   -e "QZ_TRAINER=${TRAINER}" \
   -e "QZ_HR_BELT=${HR_BELT}" \
   -e "TPV_DIRECT=${TPV_DIRECT:-0}" \
