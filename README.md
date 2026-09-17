@@ -72,8 +72,11 @@ Configure via environment:
 | `TPV_GPU` | `auto` | `intel`, `nvidia`, `none` |
 | `STATE` | `~/.local/share/tpv-full` | Where the Wine prefix and game data live |
 | `TZ` | host zone (`timedatectl`) | Time zone for TPV's HUD clock; set to override |
+| `TPV_HUB_ADVERT` | `1` | `0` skips the TrainingPeaks Hub re-advert (see below) |
+| `TPV_HUB_ADDR` | default-route IPv4 | Address the Hub app should connect to |
+| `TPV_HUB_NAME` | `<hostname> (LAN)` | Name of the re-advertised TPV instance |
 
-`verify.sh` checks the five things that actually matter: the Bluetooth backend
+`verify.sh` checks the five bridge things that actually matter: the Bluetooth backend
 chosen, the trainer connection, the DIRCON listeners, whether the mDNS advert
 carries a reachable host address, and whether the ports emit real DIRCON frames
 rather than merely accepting sockets.
@@ -163,6 +166,22 @@ Not a container bug: TPV mis-renders custom routes where two legs run within
 script that shifts a course a few metres to fix it
 (`tools/gpx-separate-legs.py`), and an AI prompt that does the same.
 
+### TrainingPeaks Hub app cannot find TPV
+
+The [Hub companion app](https://help.trainingpeaks.com/hc/en-us/articles/34618989898765-TrainingPeaks-Virtual-Hub-App)
+(chat, live stats, and a remote with gear and workout-difficulty buttons) finds
+TPV over mDNS (`_tpvirtual._tcp`) and connects in on **TCP 7779**. Under Wine,
+TPV can advertise the address of the wrong adapter — on a host running Docker it
+advertised `docker0`'s `172.17.0.1` — so Hub sees no ride.
+
+The entrypoint therefore publishes a second advert through the host's
+avahi-daemon while TPV runs, pointing at the host's default-route IPv4 address.
+Hub ignores the unreachable one. Check with `./verify.sh` (check 6) during a
+ride; override the address with `TPV_HUB_ADDR` if the default route is not the
+network your phone is on. The phone must be on the same subnet, and the host
+firewall must allow TCP 7779 and UDP 5353 (Fedora Workstation's default zone
+already does).
+
 ### Heart rate appears to come from the trainer
 
 If `heart_rate_belt_name` is unset, QZ binds no HR sensor and TPV falls back to
@@ -193,7 +212,7 @@ it to the trainer. Set `QZ_HR_BELT` and pair `Wahoo HRM` in TPV explicitly.
 | `--security-opt label=disable` | SELinux blocks the host D-Bus socket: `Permission denied`. `:z` cannot work — relabelling the host socket is `operation not permitted` |
 | `--network=host` | DIRCON binds the container netns, so the mDNS advert carries an address TPV cannot reach |
 | writable `HOME` and workdir | QZ spins on failed debug-log writes and never gets past discovery. Looks like a hang |
-| D-Bus socket mount | No BlueZ at all: `Cannot find a running Bluez` |
+| D-Bus socket mount | No BlueZ at all: `Cannot find a running Bluez`. Also how the Hub re-advert reaches avahi-daemon |
 | Avahi socket mount | No mDNS advert, so TPV never discovers the bridge |
 | Session bus mount | Connect Garmin / Strava / TrainingPeaks buttons do nothing: Wine's `xdg-open` has no browser to reach. The image's `xdg-open` forwards links to the host browser through the OpenURI portal |
 | `BLUETOOTH_FORCE_DBUS_LE_VERSION` | Qt probes bluetoothd's version by executing its path *inside* the container, where it is absent; the `"4.0"` fallback selects a legacy raw-L2CAP backend that cannot connect |
