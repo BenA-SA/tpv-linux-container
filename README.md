@@ -71,6 +71,7 @@ Configure via environment:
 | `QZ_HR_BELT` | `TRACKR HR 7DC2` | BLE name of your HR strap |
 | `TPV_GPU` | `auto` | `intel`, `nvidia`, `none` |
 | `STATE` | `~/.local/share/tpv-full` | Where the Wine prefix and game data live |
+| `TZ` | host zone (`timedatectl`) | Time zone for TPV's HUD clock; set to override |
 
 `verify.sh` checks the five things that actually matter: the Bluetooth backend
 chosen, the trainer connection, the DIRCON listeners, whether the mDNS advert
