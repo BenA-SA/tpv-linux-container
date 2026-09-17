@@ -74,7 +74,7 @@ Configure via environment:
 | `TZ` | host zone (`timedatectl`) | Time zone for TPV's HUD clock; set to override |
 | `TPV_HUB_ADVERT` | `1` | `0` skips the TrainingPeaks Hub re-advert (see below) |
 | `TPV_HUB_ADDR` | default-route IPv4 | Address the Hub app should connect to |
-| `TPV_HUB_NAME` | `<HOSTNAME> LAN` | Name of the re-advertised TPV instance |
+| `TPV_HUB_NAME` | `<hostname> (LAN)` | Name of the re-advertised TPV instance |
 
 `verify.sh` checks the five bridge things that actually matter: the Bluetooth backend
 chosen, the trainer connection, the DIRCON listeners, whether the mDNS advert

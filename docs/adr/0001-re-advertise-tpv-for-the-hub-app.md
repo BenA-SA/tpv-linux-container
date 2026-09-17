@@ -79,26 +79,6 @@ have to stop doing that and manage background publishers and traps itself. It
 would also depend on the host having `avahi-tools` installed. Publishing inside
 the container ties the advert's lifetime to TPV's automatically.
 
-### Attempt 5: service name `<hostname> (LAN)` ❌ Hub ignored it
-
-The first version of this PR named the service `fedora (LAN)` on
-`fedora-tpv-146.local`. In the end-to-end test on 2026-09-17, Hub never
-connected (no connection on 7779). We changed one thing at a time with
-TPV mid-ride, closing and reopening Hub after each change:
-
-| Adverts published | Hub connected? |
-|---|---|
-| `fedora (LAN)` on `fedora-tpv-146.local` | no |
-| + `FEDORA LAN` on `tpv-laptop.local` (the Attempt 2 adverts) | yes |
-| `fedora (LAN)` only (manual adverts stopped) | no |
-| + `FEDORA LAN` on `fedora-tpv-146.local` | **yes** |
-
-The host record was fine; **the service name was the problem**. Hub appears
-to require the name to follow TPV's own upper-case instance name (`FEDORA`).
-We don't know whether the case, the parentheses, or both break the match. We
-use the proven format rather than test that further. `TPV_HUB_NAME` still
-overrides it.
-
 ## What did we land on, and why?
 
 `scripts/entrypoint.sh` runs `advertise_hub` just before launching TPV, and
@@ -108,9 +88,8 @@ stops it after `wineserver -w`:
   (`ip -4 route get 1.1.1.1`).
 - **Records:** A record `<hostname>-tpv-<last octet>.local`. The octet prevents
   clashes between hosts with the same name; the desktop and laptop are both
-  `fedora`. Service record `<HOSTNAME> LAN._tpvirtual._tcp` port 7779,
-  `txtvers=1`. The name is the upper-cased host name, the same as TPV's own
-  Wine computer name, plus ` LAN` (see Attempt 5).
+  `fedora`. Service record `<hostname> (LAN)._tpvirtual._tcp` port 7779,
+  `txtvers=1`.
 - **How it publishes:** `avahi-publish` / `avahi-publish-service` (new
   `avahi-utils` package in the image) talk to the **host's** avahi-daemon over
   the system D-Bus socket the container already mounts for BlueZ.
