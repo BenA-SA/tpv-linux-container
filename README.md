@@ -72,6 +72,8 @@ Configure via environment:
 | `TPV_GPU` | `auto` | `intel`, `nvidia`, `none` |
 | `STATE` | `~/.local/share/tpv-full` | Where the Wine prefix and game data live |
 | `TZ` | host zone (`timedatectl`) | Time zone for TPV's HUD clock; set to override |
+| `TPV_NETWORK` | `pasta` | `host` uses host networking (needed for trainers that advertise themselves on the LAN, #13) |
+| `TPV_LAN_IF` | default-route interface | The only interface TPV sees under `pasta` |
 | `TPV_HUB_ADVERT` | `1` | `0` skips the TrainingPeaks Hub re-advert (see below) |
 | `TPV_HUB_ADDR` | default-route IPv4 | Address the Hub app should connect to |
 | `TPV_HUB_NAME` | `<hostname> (LAN)` | Name of the re-advertised TPV instance |
@@ -170,15 +172,24 @@ script that shifts a course a few metres to fix it
 
 The [Hub companion app](https://help.trainingpeaks.com/hc/en-us/articles/34618989898765-TrainingPeaks-Virtual-Hub-App)
 (chat, live stats, and a remote with gear and workout-difficulty buttons) finds
-TPV over mDNS (`_tpvirtual._tcp`) and connects in on **TCP 7779**. Under Wine,
-TPV can advertise the address of the wrong adapter — on a host running Docker it
-advertised `docker0`'s `172.17.0.1` — so Hub sees no ride.
+TPV over mDNS (`_tpvirtual._tcp`) and connects in on **TCP 7779**. TPV
+advertises an address for **every** interface it can see, and Hub only tries the
+first one. If that's a Docker bridge (`172.17.0.1`) or a VPN address the phone
+can't reach, Hub shows "start a ride" for the ~127 s TCP connect timeout before
+it moves on.
 
-The entrypoint therefore publishes a second advert through the host's
-avahi-daemon while TPV runs, pointing at the host's default-route IPv4 address.
-Hub ignores the unreachable one. Check with `./verify.sh` (check 6) during a
-ride; override the address with `TPV_HUB_ADDR` if the default route is not the
-network your phone is on. The phone must be on the same subnet, and the host
+So `run-tpv.sh` runs the container on **pasta networking bound to the LAN
+interface** (`TPV_LAN_IF`, by default the one carrying the default route). TPV
+then sees only that interface, and `-p 7779:7779` forwards Hub's connection in.
+Under pasta, TPV's own advert doesn't reach the phone, so the entrypoint
+publishes one through the host's avahi-daemon, pointing at the LAN address.
+Measured on cold starts of Hub: ~132 s on host networking with Docker running,
+3–4 s under pasta.
+
+Check with `./verify.sh` (check 6) during a ride. Override the address with
+`TPV_HUB_ADDR` if the default route is not the network your phone is on.
+`TPV_NETWORK=host` restores host networking (for trainers that advertise
+themselves on the LAN, see #13). The phone must be on the same subnet, and the host
 firewall must allow TCP 7779 and UDP 5353 (Fedora Workstation's default zone
 already does).
 
@@ -210,7 +221,9 @@ it to the trainer. Set `QZ_HR_BELT` and pair `Wahoo HRM` in TPV explicitly.
 |---|---|
 | `--userns=keep-id` | Container uid is 0 in its userns, so libdbus `EXTERNAL` auth claims uid 0 while the bus sees the real peer uid via `SO_PEERCRED`. Auth hangs: `Did not receive a reply` |
 | `--security-opt label=disable` | SELinux blocks the host D-Bus socket: `Permission denied`. `:z` cannot work — relabelling the host socket is `operation not permitted` |
-| `--network=host` | DIRCON binds the container netns, so the mDNS advert carries an address TPV cannot reach |
+| `--network=pasta:-i,<LAN if>` | TPV advertises Docker/VPN addresses too, and Hub waits ~127 s on an unreachable one. pasta copies the host's LAN address into the container, so QZ's DIRCON advert still carries a reachable address (the old `--network=host` requirement was about private container addresses) |
+| `-p 7779:7779` | Hub can't connect in to TPV under pasta |
+| `--hostname` | TPV takes its name from the container ID (e.g. `E04007E15893`) instead of the host |
 | writable `HOME` and workdir | QZ spins on failed debug-log writes and never gets past discovery. Looks like a hang |
 | D-Bus socket mount | No BlueZ at all: `Cannot find a running Bluez`. Also how the Hub re-advert reaches avahi-daemon |
 | Avahi socket mount | No mDNS advert, so TPV never discovers the bridge |
