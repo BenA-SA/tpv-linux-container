@@ -169,6 +169,7 @@ it to the trainer. Set `QZ_HR_BELT` and pair `Wahoo HRM` in TPV explicitly.
 | `Containerfile.debian` | QZ only, built from source (bridge on a separate host) |
 | `patches/` | The QZ root-guard patch, published as GPL requires |
 | `scripts/entrypoint.sh` | Mode dispatch, prefix seeding, QZ + TPV startup |
+| `scripts/xdg-open-host.sh` | Opens links from TPV in the host browser |
 | `scripts/build-prefix.sh` | Builds the template Wine prefix at image build time |
 | `run-tpv.sh` | GPU, display and audio wiring for the combined image |
 | `run-qz-debian.sh` | Runs the QZ-only image |
@@ -184,6 +185,7 @@ it to the trainer. Set `QZ_HR_BELT` and pair `Wahoo HRM` in TPV explicitly.
 | writable `HOME` and workdir | QZ spins on failed debug-log writes and never gets past discovery. Looks like a hang |
 | D-Bus socket mount | No BlueZ at all: `Cannot find a running Bluez` |
 | Avahi socket mount | No mDNS advert, so TPV never discovers the bridge |
+| Session bus mount | Connect Garmin / Strava / TrainingPeaks buttons do nothing: Wine's `xdg-open` has no browser to reach. The image's `xdg-open` forwards links to the host browser through the OpenURI portal |
 | `BLUETOOTH_FORCE_DBUS_LE_VERSION` | Qt probes bluetoothd's version by executing its path *inside* the container, where it is absent; the `"4.0"` fallback selects a legacy raw-L2CAP backend that cannot connect |
 
 QZ needs **no root**. Its upstream `getuid()` guard predates QZ reaching BlueZ
@@ -192,7 +194,7 @@ check, which is why a patch rather than `--cap-add` is required.
 
 ## Scope
 
-This is packaging, not sandboxing. Host networking, host D-Bus and host Avahi mean
+This is packaging, not sandboxing. Host networking, host D-Bus (system and session) and host Avahi mean
 the container is tightly coupled to the host. What it removes is installing a Qt5
 build environment, compiling QZ, and assembling a working Wine prefix by hand.
 

@@ -68,6 +68,15 @@ HOST_TZ="${TZ:-$(timedatectl show -p Timezone --value 2>/dev/null || true)}"
 [ -e /etc/localtime ] && TIMEZONE+=(-v /etc/localtime:/etc/localtime:ro)
 echo "==> timezone: ${HOST_TZ:-host /etc/localtime}"
 
+HOST_LINKS=()
+SESSION_BUS="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/bus"
+if [ -S "$SESSION_BUS" ]; then
+  HOST_LINKS=(-v "$SESSION_BUS:/run/host-session-bus"
+              -e DBUS_SESSION_BUS_ADDRESS=unix:path=/run/host-session-bus)
+else
+  echo "==> WARNING: no session bus; account-linking buttons cannot open a browser" >&2
+fi
+
 INHIBIT=()
 if [ "$MODE" != qz ] && command -v gnome-session-inhibit >/dev/null; then
   INHIBIT=(gnome-session-inhibit --inhibit idle:suspend
@@ -83,6 +92,7 @@ exec "${INHIBIT[@]}" podman run --rm --name tpv \
   "${GPU[@]}" "${AUDIO[@]}" \
   "${DISPLAY_ARGS[@]}" \
   "${TIMEZONE[@]}" \
+  "${HOST_LINKS[@]}" \
   -e "QZ_TRAINER=${TRAINER}" \
   -e "QZ_HR_BELT=${HR_BELT}" \
   -e "TPV_DIRECT=${TPV_DIRECT:-0}" \
