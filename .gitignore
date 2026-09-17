@@ -3,3 +3,6 @@ qdomyos-zwift
 
 # Local build logs
 build-*.log
+
+# Python bytecode
+__pycache__/
