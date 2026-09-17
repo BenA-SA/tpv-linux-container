@@ -18,17 +18,17 @@ whose Wine prefix was already created under UTC.
 
 ## What did we try?
 
-### Attempt 1: pass `TZ` only ❌ not enough on its own
+### Option 1: pass `TZ` only ❌ considered, not enough on its own
 
 `TZ` alone relies on the image's zoneinfo and a zone name `timedatectl` can
 report. Some hosts don't have `timedatectl`, so there has to be a fallback.
 
-### Attempt 2: bind-mount `/etc/localtime` only ❌ not enough on its own
+### Option 2: bind-mount `/etc/localtime` only ❌ considered, not enough on its own
 
 This gives the right offset, including DST, from the host's own zone file, but
 no zone *name* for anything that reads `TZ`, and no simple override.
 
-### Attempt 3: fix the environment and leave the prefix alone ❌ failed in practice
+### Attempt: fix the environment and leave the prefix alone ❌ failed in practice
 
 Even with the container's clock correct, a prefix created under UTC kept an
 empty `TimeZoneKeyName`. Wine only rewrites it when the prefix is updated, so
