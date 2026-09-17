@@ -155,6 +155,14 @@ connected BLE device stops advertising — so another machine cannot see it:
 bluetoothctl disconnect <trainer-mac>
 ```
 
+### Custom GPX routes show a road at head height
+
+Not a container bug: TPV mis-renders custom routes where two legs run within
+~10 m of each other, which covers most out-and-back race courses. See
+[docs/custom-route-overlap.md](docs/custom-route-overlap.md) for the cause, a
+script that shifts a course a few metres to fix it
+(`tools/gpx-separate-legs.py`), and an AI prompt that does the same.
+
 ### Heart rate appears to come from the trainer
 
 If `heart_rate_belt_name` is unset, QZ binds no HR sensor and TPV falls back to
@@ -174,6 +182,8 @@ it to the trainer. Set `QZ_HR_BELT` and pair `Wahoo HRM` in TPV explicitly.
 | `run-tpv.sh` | GPU, display and audio wiring for the combined image |
 | `run-qz-debian.sh` | Runs the QZ-only image |
 | `verify.sh` | End-to-end proof the bridge works |
+| `tools/gpx-separate-legs.py` | Finds and fixes overlapping legs in custom GPX routes |
+| `docs/` | Longer write-ups of known issues, and decision records |
 
 ## Why each podman flag is load-bearing
 
