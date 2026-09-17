@@ -97,7 +97,8 @@ advertise_hub() {
   fi
   host_label=$(printf '%s' "${TPV_HOST_NAME:-tpv}" | tr -c 'A-Za-z0-9-' '-')
   record="${host_label}-tpv-${addr##*.}.local"
-  name="${TPV_HUB_NAME:-${TPV_HOST_NAME:-TPV} (LAN)}"
+  # Hub ignores "fedora (LAN)" but connects to "FEDORA LAN": match TPV's upper-case Wine computer name.
+  name="${TPV_HUB_NAME:-$(printf '%s' "${TPV_HOST_NAME:-TPV}" | tr '[:lower:]' '[:upper:]') LAN}"
   avahi-publish -a -R "$record" "$addr" &
   HUB_ADVERT_PIDS=($!)
   avahi-publish-service -H "$record" "$name" _tpvirtual._tcp 7779 txtvers=1 &
