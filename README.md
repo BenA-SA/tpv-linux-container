@@ -163,6 +163,15 @@ Not a container bug: TPV mis-renders custom routes where two legs run within
 script that shifts a course a few metres to fix it
 (`tools/gpx-separate-legs.py`), and an AI prompt that does the same.
 
+### TrainingPeaks rejects a route for a tight curve radius
+
+Not a container bug either: TrainingPeaks refuses any upload whose points
+describe a curve radius under 6 m, which junctions drawn with two or three
+closely spaced points routinely do — and shifting a course sideways tightens
+them further. See
+[docs/custom-route-tight-curves.md](docs/custom-route-tight-curves.md) and
+`tools/gpx-widen-curves.py`. Run it **after** `gpx-separate-legs.py`.
+
 ### Heart rate appears to come from the trainer
 
 If `heart_rate_belt_name` is unset, QZ binds no HR sensor and TPV falls back to
@@ -183,6 +192,7 @@ it to the trainer. Set `QZ_HR_BELT` and pair `Wahoo HRM` in TPV explicitly.
 | `run-qz-debian.sh` | Runs the QZ-only image |
 | `verify.sh` | End-to-end proof the bridge works |
 | `tools/gpx-separate-legs.py` | Finds and fixes overlapping legs in custom GPX routes |
+| `tools/gpx-widen-curves.py` | Widens curves TrainingPeaks rejects as too tight |
 | `docs/` | Longer write-ups of known issues, and decision records |
 
 ## Why each podman flag is load-bearing
