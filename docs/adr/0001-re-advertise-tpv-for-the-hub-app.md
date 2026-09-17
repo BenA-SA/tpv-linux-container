@@ -1,4 +1,4 @@
-# 0001. Re-advertise TPV's `_tpvirtual._tcp` service from the container so the Hub app can connect
+# 0001. Run TPV on pasta networking and re-advertise `_tpvirtual._tcp` so the Hub app connects promptly
 
 - **Status:** Accepted
 - **Date:** 2026-09-17
@@ -53,8 +53,10 @@ avahi-publish-service -H tpv-laptop.local "FEDORA LAN" _tpvirtual._tcp 7779 txtv
 
 Hub connected at once. TPV's log showed `accepted new connection from
 192.168.0.105` / `Authentication Success`, and the In Game remote moved the
-rider. **Hub picked the reachable entry even though TPV's broken `FEDORA` advert
-was still published**, so we don't need to suppress TPV's own advert. The one
+rider. At the time we concluded that **Hub picks the reachable entry even while
+TPV's broken `FEDORA` advert is still published**. Attempt 5 showed that was
+wrong: Hub was already open when the re-advert appeared, and a newly discovered
+service is what makes it reconnect. The one
 open question is a single "Lost heartbeat" drop 30 s into the first connection;
 the phone reconnected by itself.
 
@@ -79,10 +81,68 @@ have to stop doing that and manage background publishers and traps itself. It
 would also depend on the host having `avahi-tools` installed. Publishing inside
 the container ties the advert's lifetime to TPV's automatically.
 
+### Attempt 5: ship the re-advert on its own ❌ Hub still waited ~130 s
+
+The end-to-end test of the first version of this PR (TPV on `--network=host`
+plus the re-advert) failed. Hub kept saying "start a ride". While diagnosing it,
+we changed the advert name (`fedora (LAN)` → `FEDORA LAN`), which looked like a
+fix but was a red herring: every connection came right after *some* new advert
+appeared while Hub was open, whatever its name.
+
+With adb on the phone we could see Android's NSD log
+(`dumpsys servicediscovery`) and the phone's `netstat`. On three cold starts of
+Hub (force-stop, wait 20 s so the NSD cache expires, launch):
+
+| Cold start | Hub resolved first | Phone's first attempt | Connected |
+|---|---|---|---|
+| 1 | `FEDORA` [172.17.0.1, 100.89.193.106, 192.168.0.146] | `172.17.0.1:7779` SYN_SENT | +132 s |
+| 2 | same | same | +133 s |
+| 3 | same | same | +133 s |
+
+**Hub connects to the first address of the first service it resolves, and
+waits out Android's ~127 s TCP connect timeout** before trying anything else.
+TPV advertises an address for every interface Wine reports, and the re-advert
+can't change which service Hub resolves first.
+
+### Attempt 6: delete `docker0` ⚠️ diagnostic only
+
+With `docker0` deleted and TPV restarted, TPV's advert became
+[100.89.193.106, 192.168.0.146], and Hub connected in 3–4 s on three cold starts,
+via Tailscale. That confirmed the cause. It isn't a fix: it changes the host, a
+phone not on Tailscale would hit the same timeout on the next address, and
+Docker Compose `br-*` bridges would bring it back.
+
+### Attempt 7: hide interfaces from Wine with an `LD_PRELOAD` shim ❌ not chosen
+
+Wine enumerates adapters with `if_nameindex()` and addresses with `getifaddrs()`,
+so a preload library could filter them. We dropped it in favour of standard
+container networking, which needs no custom native code.
+
+### Attempt 8: pasta networking bound to the LAN interface ✅ chosen
+
+`--network=pasta:-i,wlp0s20f3 -p 7779:7779` gives the container a copy of the
+host's LAN address only. Wine then reports just `wlp0s20f3` and `lo`. Three cold
+starts of Hub with `docker0` and Tailscale both present on the host:
+
+| Cold start | Hub resolved | Connected |
+|---|---|---|
+| 1 | `FEDORA LAN` [192.168.0.146] | +3 s |
+| 2 | same | +4 s |
+| 3 | same | +3 s |
+
+TPV's own advert doesn't reach the phone under pasta, so the re-advert went from
+a nice-to-have to **required**.
+
 ## What did we land on, and why?
 
-`scripts/entrypoint.sh` runs `advertise_hub` just before launching TPV, and
-stops it after `wineserver -w`:
+**Networking:** `run-tpv.sh` runs the container with
+`--network=pasta:-i,<LAN if>`, `-p 7779:7779` and `--hostname <host>`, where the
+LAN interface is `TPV_LAN_IF` or the default-route interface. `qz` mode and
+`TPV_NETWORK=host` keep host networking. `--hostname` keeps TPV's name as the
+host's; otherwise it becomes the container ID.
+
+**Re-advert:** `scripts/entrypoint.sh` runs `advertise_hub` just before launching
+TPV, and stops it after `wineserver -w`:
 
 - **Address:** `TPV_HUB_ADDR`, or the source address of the default route
   (`ip -4 route get 1.1.1.1`).
@@ -98,9 +158,9 @@ stops it after `wineserver -w`:
 - **Checking:** `verify.sh` check 6 flags each `_tpvirtual._tcp` IPv4 entry as a
   host LAN address or not.
 
-This was chosen because it's the approach proven on real hardware (Attempt 2),
-needs no host changes, works whatever bridge TPV happens to pick, and is
-harmless if TPV's own advert is correct: Hub just sees a duplicate.
+This was chosen because it's measured on real hardware (Attempt 8), uses only
+standard podman networking, needs no host changes, and works whatever bridges or
+VPNs the host has.
 
 ```mermaid
 sequenceDiagram
@@ -109,23 +169,27 @@ sequenceDiagram
     participant T as TPVirtual.exe (Wine)
     participant H as Hub app (phone)
     E->>A: D-Bus: publish A record + _tpvirtual._tcp → LAN IP:7779
-    E->>T: launch TPV
-    T-->>H: own mDNS advert (may carry a bridge IP, e.g. 172.17.0.1)
-    A-->>H: re-advert (routable LAN IP)
-    H->>T: TCP connect LAN IP:7779 → Version, Authenticate, remote commands
+    E->>T: launch TPV (pasta: sees only the LAN interface)
+    A-->>H: advert (LAN IP only)
+    H->>T: TCP connect host LAN IP:7779 → pasta -p forward → TPV
+    Note over H,T: Version, Authenticate, remote commands
     T-->>E: wineserver -w returns
     E->>A: stop publishers (records withdrawn)
 ```
 
-We'd revisit this if TPV starts advertising the right address under Wine, or if
-Hub starts preferring TPV's own entry over ours.
+We'd revisit this if Hub starts trying every resolved address (reported to
+TrainingPeaks), or if TPV starts advertising only reachable addresses.
 
 ## What does this cost us?
 
 - **Image rebuild:** `avahi-utils` is added to the runtime apt layer, which
   invalidates the Wine and prefix layers after it.
-- **Duplicate entries:** two `_tpvirtual._tcp` instances appear on the LAN
-  while TPV runs. Hub copes today; a future Hub version might not.
+- **Network-based trainers:** under pasta, inbound LAN multicast probably
+  doesn't reach TPV, so trainers that advertise themselves on the network (a
+  Wi-Fi KICKR, a remote DIRCON bridge) may not be discovered.
+  `TPV_NETWORK=host` is the workaround; tracked in #13.
+- **`verify.sh`:** checks 3 and 5 now run inside the container under pasta,
+  because QZ's ports live in its network namespace.
 - **Address fixed at start-up:** if the host changes networks mid-ride (say,
   garage vs house Wi-Fi, which are different subnets), the advert is stale
   until TPV restarts. Multi-homed hosts may need `TPV_HUB_ADDR`.
@@ -134,6 +198,6 @@ Hub starts preferring TPV's own entry over ours.
 - **More host coupling:** the container now also publishes on the host's mDNS,
   on top of reading it.
 - **Follow-up:**
-  - End-to-end test after the rebuild.
+  - A real ride in `both` mode (QZ + trainer) under pasta.
   - A 60-minute ride watching for "Lost heartbeat" drops.
-  - Optionally, find out why Wine exposes `docker0` first.
+  - #13: network-based trainers under pasta.
