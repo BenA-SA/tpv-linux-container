@@ -33,7 +33,7 @@ $QEMU -enable-kvm -m "$MEM" -smp "$CPUS" -machine q35 \
 trap 'kill "$(cat qemu.pid 2>/dev/null)" 2>/dev/null || true' EXIT
 
 echo "==> waiting for guest ssh"
-for i in $(seq 1 90); do $SSH true 2>/dev/null && break; sleep 5; done
+for _ in $(seq 1 90); do $SSH true 2>/dev/null && break; sleep 5; done
 $SSH true 2>/dev/null || { echo "guest did not come up; see serial-hypothesis.log" >&2; exit 1; }
 echo "==> guest kernel: $($SSH 'uname -r' 2>/dev/null)"
 

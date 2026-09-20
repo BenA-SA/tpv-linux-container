@@ -1,0 +1,55 @@
+name: lint
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shell:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck --version
+      - name: Lint shell scripts
+        run: |
+          find . -name '*.sh' -not -path './.git/*' -print0 \
+            | sort -z \
+            | xargs -0 shellcheck --severity=warning --format=gcc
+
+  python:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint Python tools
+        run: pipx run ruff==0.11.7 check tools/
+
+  containerfiles:
+    name: hadolint
+    runs-on: ubuntu-latest
+    # Rules this image breaks deliberately; everything else still fails the job.
+    # DL3008 apt versions float with the suite (the ones that matter are ARG-pinned);
+    # DL3003 `cd /build` is a one-off in a throwaway stage; DL3015 winehq needs its
+    # recommends; DL3066 the image creates a named user; DL4006 the shell is dash.
+    env:
+      HADOLINT_IGNORES: >-
+        --ignore DL3008 --ignore DL3003 --ignore DL3015
+        --ignore DL3066 --ignore DL4006
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint Containerfiles
+        run: |
+          for f in Containerfile.*; do
+            echo "==> $f"
+            docker run --rm -i hadolint/hadolint:v2.15.1-alpine \
+              hadolint --no-color $HADOLINT_IGNORES - < "$f"
+          done

@@ -13,6 +13,7 @@ wine reg add 'HKEY_CURRENT_USER\Software\Wine' /v Version /t REG_SZ /d win10 /f
 wineserver -w
 
 echo "==> DXVK"
+# shellcheck disable=SC2211 # the version in the path is unknown until build time
 /opt/dxvk-*/setup_dxvk.sh install --symlink 2>/dev/null \
   || for d in /opt/dxvk-*/x64/*.dll; do
        cp -f "$d" "${WINEPREFIX}/drive_c/windows/system32/"
@@ -22,6 +23,7 @@ for d in /opt/dxvk-*/x32/*.dll; do
 done
 
 echo "==> VKD3D-Proton"
+# shellcheck disable=SC2211 # the version in the path is unknown until build time
 /opt/vkd3d-proton-*/setup_vkd3d_proton.sh install --symlink 2>/dev/null \
   || for d in /opt/vkd3d-proton-*/x64/*.dll; do
        cp -f "$d" "${WINEPREFIX}/drive_c/windows/system32/"
