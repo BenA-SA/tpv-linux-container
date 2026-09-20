@@ -346,6 +346,12 @@ def _why_stuck(points: list[Point], start: int, end: int, minimum_m: float) -> s
         )
     )
     where = f"point {start} turns {turn:.0f} deg"
+    if start - 1 < 1 or end + 1 > len(points) - 2:
+        return (
+            f"the corner where {where} sits at the route boundary: widening hangs an"
+            " arc between the straights either side, and there is no room for one"
+            " here, so extend the route past the corner or redraw it by hand"
+        )
     if turn < HAIRPIN_DEG:
         return f"no arc of {minimum_m:g} m or wider fits the corner where {where}"
     return (
@@ -428,7 +434,7 @@ def main() -> int:
 
     points, notes = widen(original, args.radius, args.minimum)
     fixed = Course(_render(original, points))
-    print(f"\nwidened {len(tight)} corner(s) to {args.radius:g} m")
+    print(f"\nwidened {len(tight) - len(notes)} of {len(tight)} corner(s) to {args.radius:g} m")
     for note in notes:
         print(f"  ! {note}", file=sys.stderr)
     remaining = report("fixed", fixed, args.minimum)
