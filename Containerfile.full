@@ -44,8 +44,12 @@ RUN mkdir -p /build && cd /build \
 FROM debian:${DEBIAN_RELEASE} AS runtime
 
 ARG WINE_VERSION=11.0.0.0~trixie-1
+# Each graphics-layer version is pinned with its release tarball's sha256, so a
+# swapped or tampered tarball fails the build. Bump the two lines together.
 ARG DXVK_VERSION=3.1
+ARG DXVK_SHA256=30f9cc326874be344285582275446968cfa4c069db31ce56df312d6644179154
 ARG VKD3D_VERSION=3.0.1
+ARG VKD3D_SHA256=3cf2315522af5e43605ef6d3c41dad91387040bf97199934f3f7ab76caaa2f0c
 ARG TPV_INSTALLER_URL=https://virtual.trainingpeaks.com/TPVirtual-Installer_v6.exe
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -80,11 +84,19 @@ RUN dpkg --add-architecture i386 \
  && apt-get install -y --install-recommends "winehq-stable=${WINE_VERSION}" \
  && rm -rf /var/lib/apt/lists/*
 
-# DXVK and VKD3D-Proton pinned to the versions proven in the Bottles setup.
-RUN curl -fsSL "https://github.com/doitsujin/dxvk/releases/download/v${DXVK_VERSION}/dxvk-${DXVK_VERSION}.tar.gz" \
-      | tar -xz -C /opt \
- && curl -fsSL "https://github.com/HansKristian-Work/vkd3d-proton/releases/download/v${VKD3D_VERSION}/vkd3d-proton-${VKD3D_VERSION}.tar.zst" \
-      | tar --zstd -x -C /opt
+# DXVK and VKD3D-Proton, at the versions proven in the Bottles setup. Downloaded
+# to disk rather than piped into tar so the bytes can be checked before they run.
+# --strict is load-bearing: without it a blank or malformed checksum line is a
+# warning only, and the archive it belongs to would be extracted unverified.
+RUN curl -fsSL -o /tmp/dxvk.tar.gz \
+      "https://github.com/doitsujin/dxvk/releases/download/v${DXVK_VERSION}/dxvk-${DXVK_VERSION}.tar.gz" \
+ && curl -fsSL -o /tmp/vkd3d.tar.zst \
+      "https://github.com/HansKristian-Work/vkd3d-proton/releases/download/v${VKD3D_VERSION}/vkd3d-proton-${VKD3D_VERSION}.tar.zst" \
+ && printf '%s  /tmp/dxvk.tar.gz\n%s  /tmp/vkd3d.tar.zst\n' "${DXVK_SHA256}" "${VKD3D_SHA256}" \
+      | sha256sum --strict -c - \
+ && tar -xz -C /opt -f /tmp/dxvk.tar.gz \
+ && tar --zstd -x -C /opt -f /tmp/vkd3d.tar.zst \
+ && rm -f /tmp/dxvk.tar.gz /tmp/vkd3d.tar.zst
 
 # uid 1000 so podman --userns=keep-id maps the host user onto this account and
 # the prefix and volumes stay writable.
