@@ -82,8 +82,10 @@ sync_timezone() {
 }
 
 lan_address() {
+  # No route yet (pasta still settling) must yield an empty string, not kill the script.
   ip -4 route get 1.1.1.1 2>/dev/null \
-    | awk '{for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit }}'
+    | awk '{for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit }}' \
+    || true
 }
 
 advertise_hub() {
