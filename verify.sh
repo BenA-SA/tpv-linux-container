@@ -9,8 +9,17 @@ grep -Ei 'Bluetoothd:|kernel ATT|raw socket|BluezDBus' "$LOG" 2>/dev/null | head
 echo "2. trainer connection (want ConnectedState):"
 grep -Ei 'ConnectedState|Connection refused' "$LOG" 2>/dev/null | tail -2
 
+# Under pasta (run-tpv.sh default) QZ's ports live in the container's network namespace, not the host's.
+NETMODE=$(podman inspect tpv --format '{{.HostConfig.NetworkMode}}' 2>/dev/null || true)
+IN_CTR=""
+[ -n "$NETMODE" ] && [ "$NETMODE" != host ] && IN_CTR=1
+
 echo "3. DIRCON listeners (want 36866 + 36867):"
-ss -tlnp 2>/dev/null | grep 3686 || echo "   NOT LISTENING"
+if [ -n "$IN_CTR" ]; then
+  podman exec tpv ss -tln 2>/dev/null | grep 3686 || echo "   NOT LISTENING (inside container)"
+else
+  ss -tlnp 2>/dev/null | grep 3686 || echo "   NOT LISTENING"
+fi
 
 echo "4. mDNS advert (must carry a real host LAN address):"
 HOSTIPS=$(ip -4 -o addr show scope global \
@@ -32,6 +41,11 @@ fi
 echo "5. ports speak DIRCON (want a frame, not just an open socket):"
 IP=$(ip -4 -o addr show scope global | awk '$2!~/^(br-|docker|veth)/{print $4}' | cut -d/ -f1 | head -1)
 for p in 36866 36867; do
+  if [ -n "$IN_CTR" ]; then
+    printf "   container 127.0.0.1:%s -> " "$p"
+    podman exec tpv bash -c "exec 3<>/dev/tcp/127.0.0.1/$p && timeout 4 head -c 16 <&3 | od -An -tx1" 2>&1 | tail -1
+    continue
+  fi
   printf "   %s:%s -> " "$IP" "$p"
   timeout 6 python3 -c "
 import socket,binascii,sys
@@ -40,3 +54,18 @@ d=s.recv(256); s.close()
 print(len(d),'bytes:',binascii.hexlify(d[:16]).decode())
 " "$IP" "$p" 2>&1 | tail -1
 done
+
+echo "6. TrainingPeaks Hub advert (TPV running; want at least one OK):"
+HUBADV=$(timeout 12 avahi-browse -rpt _tpvirtual._tcp 2>/dev/null \
+  | awk -F';' '/^=/ && $3=="IPv4" {print $8, $9, $4}' | sort -u)
+if [ -z "$HUBADV" ]; then
+  echo "   no advert (is TPV running?)"
+else
+  echo "$HUBADV" | while read -r ip port name; do
+    if echo "$HOSTIPS" | grep -qx "$ip"; then
+      echo "   OK   $ip:$port $name"
+    else
+      echo "   BAD  $ip:$port $name (unreachable; harmless if an OK entry exists)"
+    fi
+  done
+fi

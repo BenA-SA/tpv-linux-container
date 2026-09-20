@@ -5,6 +5,7 @@ set -euo pipefail
 
 MODE="${1:-both}"
 STATE="${TPV_HOME:-/state}"
+HUB_ADVERT_PIDS=()
 export WINEPREFIX="$STATE/wineprefix"
 export WINEARCH=win64 WINEDEBUG="${WINEDEBUG:--all}"
 export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=}"
@@ -80,10 +81,54 @@ sync_timezone() {
   printf '%s' "$current" > "$marker"
 }
 
+lan_address() {
+  # No route yet (pasta still settling) must yield an empty string, not kill the script.
+  ip -4 route get 1.1.1.1 2>/dev/null \
+    | awk '{for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit }}' \
+    || true
+}
+
+advertise_hub() {
+  # TPV's own _tpvirtual._tcp advert can carry a bridge address (docker0) the Hub app cannot reach (#3).
+  [ "${TPV_HUB_ADVERT:-1}" = "1" ] || return 0
+  local addr host_label record name
+  addr="${TPV_HUB_ADDR:-$(lan_address)}"
+  if [ -z "$addr" ]; then
+    echo "==> WARNING: no LAN address found; the TrainingPeaks Hub app may not find TPV" >&2
+    return 0
+  fi
+  host_label=$(printf '%s' "${TPV_HOST_NAME:-tpv}" | tr -c 'A-Za-z0-9-' '-')
+  record="${host_label}-tpv-${addr##*.}.local"
+  name="${TPV_HUB_NAME:-${TPV_HOST_NAME:-TPV} (LAN)}"
+  avahi-publish -a -R "$record" "$addr" &
+  HUB_ADVERT_PIDS=($!)
+  avahi-publish-service -H "$record" "$name" _tpvirtual._tcp 7779 txtvers=1 &
+  HUB_ADVERT_PIDS+=($!)
+  sleep 2
+  # bash's kill builtin returns 0 if ANY pid is live, so check them one at a time.
+  for pid in "${HUB_ADVERT_PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      continue
+    fi
+    stop_hub_advert
+    HUB_ADVERT_PIDS=()
+    echo "==> WARNING: TrainingPeaks Hub advert failed (no avahi-daemon, or a name clash);" >&2
+    echo "    set TPV_HUB_NAME / TPV_HUB_ADDR, or TPV_HUB_ADVERT=0 to skip" >&2
+    return 0
+  done
+  echo "==> TrainingPeaks Hub advert: '${name}' -> ${addr}:7779"
+}
+
+stop_hub_advert() {
+  [ ${#HUB_ADVERT_PIDS[@]} -gt 0 ] || return 0
+  kill "${HUB_ADVERT_PIDS[@]}" 2>/dev/null || true
+}
+
 run_tpv() {
   seed_prefix
   ensure_tpv
   sync_timezone
+  advertise_hub
   # TPV refuses a direct launch of the game exe ("must be launched using the
   # TPVirtual-Launcher"), so the launcher is the only supported path. Do not
   # exec it: it hands off to the game and exits, which would take the
@@ -95,6 +140,7 @@ run_tpv() {
   wine "$WINEPREFIX/$TPV_LAUNCHER" || true
   echo "==> launcher exited; waiting on any TPV process it started"
   wineserver -w
+  stop_hub_advert
   echo "==> all wine processes finished"
 }
 
