@@ -43,7 +43,7 @@ QPID=$(cat qemu.pid)
 trap 'kill '"$QPID"' 2>/dev/null || true' EXIT
 
 echo "==> waiting for the guest to accept ssh"
-for i in $(seq 1 90); do $SSH true 2>/dev/null && break; sleep 5; done
+for _ in $(seq 1 90); do $SSH true 2>/dev/null && break; sleep 5; done
 $SSH true 2>/dev/null || { echo "guest never came up; see serial-$NVR.log" >&2; exit 1; }
 
 echo "==> waiting for cloud-init"
@@ -61,7 +61,7 @@ if [ "$RUNNING" != "${NVR}.x86_64" ]; then
   $SSH "sudo grubby --set-default /boot/vmlinuz-${NVR}.x86_64 && sudo reboot" 2>/dev/null || true
   echo "==> guest rebooting into $NVR"
   sleep 20
-  for i in $(seq 1 90); do $SSH true 2>/dev/null && break; sleep 5; done
+  for _ in $(seq 1 90); do $SSH true 2>/dev/null && break; sleep 5; done
   RUNNING=$($SSH 'uname -r' 2>/dev/null)
 fi
 
