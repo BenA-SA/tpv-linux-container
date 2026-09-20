@@ -103,11 +103,17 @@ advertise_hub() {
   avahi-publish-service -H "$record" "$name" _tpvirtual._tcp 7779 txtvers=1 &
   HUB_ADVERT_PIDS+=($!)
   sleep 2
-  if ! kill -0 "${HUB_ADVERT_PIDS[@]}" 2>/dev/null; then
+  # bash's kill builtin returns 0 if ANY pid is live, so check them one at a time.
+  for pid in "${HUB_ADVERT_PIDS[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      continue
+    fi
+    stop_hub_advert
+    HUB_ADVERT_PIDS=()
     echo "==> WARNING: TrainingPeaks Hub advert failed (no avahi-daemon, or a name clash);" >&2
     echo "    set TPV_HUB_NAME / TPV_HUB_ADDR, or TPV_HUB_ADVERT=0 to skip" >&2
     return 0
-  fi
+  done
   echo "==> TrainingPeaks Hub advert: '${name}' -> ${addr}:7779"
 }
 
