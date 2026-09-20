@@ -362,7 +362,7 @@ def _render(course: Course, points: list[Point]) -> str:
     body = "\n".join(
         f'    <{tag} lat="{lat:.9f}" lon="{lon:.9f}">\n        <ele>{p.ele:.1f}</ele>\n    </{tag}>'
         if p.ele is not None
-        else f'    <{tag} lat="{lat:.9f}" lon="{lon:.9f}"/>'
+        else f'    <{tag} lat="{lat:.9f}" lon="{lon:.9f}"></{tag}>'
         for (lat, lon), p in zip(latlon, points)
     )
     head, _, rest = course.text.partition(f"<{tag}")
@@ -380,8 +380,12 @@ def _render(course: Course, points: list[Point]) -> str:
 def report(label: str, course: Course, minimum_m: float) -> list[int]:
     radii = course.radii()
     tight = course.tight_indices(minimum_m)
+    curved = [r for r in radii if r != float("inf")]
     print(f"{label}: {course.length_m / 1000:.2f} km, {len(course.points)} points")
-    print(f"  tightest curve radius: {min(r for r in radii if r != float('inf')):.2f} m")
+    if curved:
+        print(f"  tightest curve radius: {min(curved):.2f} m")
+    else:
+        print("  tightest curve radius: n/a (no curvature; every point is collinear)")
     print(f"  points under {minimum_m:g} m: {len(tight)}")
     for i in tight:
         lat, lon = course.to_latlon(course.points[i])
