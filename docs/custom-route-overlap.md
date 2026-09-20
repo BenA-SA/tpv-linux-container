@@ -142,3 +142,7 @@ account:
 - Offsetting to the inside of a very tight hairpin can fold the course. The
   script's self-crossing report catches this; use a smaller `--offset` or the
   other `--side` if it appears.
+- Offsetting **tightens corners** on the side it shifts towards, and
+  TrainingPeaks rejects an upload whose curve radius drops under 6 m. Run
+  `tools/gpx-widen-curves.py` on the offset file afterwards — see
+  [custom-route-tight-curves.md](custom-route-tight-curves.md).
