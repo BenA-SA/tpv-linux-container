@@ -25,8 +25,8 @@ import re
 import sys
 from dataclasses import dataclass
 
-TRKPT = re.compile(
-    r'<(?:trkpt|rtept)\b[^>]*\blat="([-+\d.eE]+)"[^>]*\blon="([-+\d.eE]+)"[^>]*>'
+POINT = re.compile(
+    r'<(trkpt|rtept)\b[^>]*\blat="([-+\d.eE]+)"[^>]*\blon="([-+\d.eE]+)"[^>]*>'
     r"(?:\s*<ele>([-+\d.eE]+)</ele>)?.*?</(?:trkpt|rtept)>",
     re.DOTALL,
 )
@@ -55,17 +55,18 @@ class Course:
 
     def __init__(self, text: str):
         self.text = text
-        raw = TRKPT.findall(text)
+        raw = POINT.findall(text)
         if len(raw) < 3:
             raise SystemExit("no <trkpt>/<rtept> points found")
-        latlon = [(float(lat), float(lon)) for lat, lon, _ in raw]
+        self.tag = raw[0][0]
+        latlon = [(float(lat), float(lon)) for _, lat, lon, _ in raw]
         self.origin = latlon[0]
         mean_lat = sum(lat for lat, _ in latlon) / len(latlon)
         self.m_per_deg_lon = 111_320 * math.cos(math.radians(mean_lat))
         self.m_per_deg_lat = 110_540
         self.points = [
             Point(*self._to_xy(lat, lon), float(ele) if ele else None)
-            for (lat, lon), (_, _, ele) in zip(latlon, raw)
+            for (lat, lon), (_, _, _, ele) in zip(latlon, raw)
         ]
 
     def _to_xy(self, lat: float, lon: float) -> tuple[float, float]:
@@ -150,6 +151,22 @@ def _grow(radii: list[float], index: int) -> tuple[int, int]:
     return start, end
 
 
+@dataclass
+class Arc:
+    """A fitted arc, with the indices of the two points it hangs between.
+
+    ``before``/``after`` are what the caller must splice against: the arc starts
+    on the straight running into ``points[before]`` and ends on the one leaving
+    ``points[after]``. They are not always the corner's immediate neighbours,
+    because a tight corner is hung between wider pairs (see
+    ``Fillet._tangent_candidates``).
+    """
+
+    points: list[Point]
+    before: int
+    after: int
+
+
 class Fillet:
     """A circular arc of the target radius replacing one corner of the course."""
 
@@ -158,7 +175,7 @@ class Fillet:
         self.start, self.end = start, end
         self.radius_m, self.floor_m = radius_m, floor_m
 
-    def arc(self) -> list[Point] | None:
+    def arc(self) -> Arc | None:
         """The widest arc that fits this corner, or ``None`` when even the floor radius won't.
 
         A corner between two short segments has no room for the target radius, so
@@ -167,9 +184,9 @@ class Fillet:
         """
         for radius in self._radii():
             for before, after in self._tangent_candidates():
-                arc = self._arc_between(before, after, radius)
-                if arc is not None:
-                    return arc
+                fitted = self._arc_between(before, after, radius)
+                if fitted is not None:
+                    return Arc(fitted, before, after)
         return None
 
     def _radii(self):
@@ -307,14 +324,14 @@ def _apply_groups(points, groups, radius_m, minimum_m, stuck) -> tuple[list[Poin
     cursor = 0
     failures = []
     for start, end in groups:
-        arc = Fillet(points, start, end, radius_m, minimum_m).arc()
-        if arc is None:
+        fitted = Fillet(points, start, end, radius_m, minimum_m).arc()
+        if fitted is None:
             stuck.add(_key(points, (start, end)))
             failures.append(_why_stuck(points, start, end, minimum_m))
             continue
-        rebuilt.extend(points[cursor : max(cursor, start - 1)])
-        rebuilt.extend(arc)
-        cursor = end + 2
+        rebuilt.extend(points[cursor : max(cursor, fitted.before)])
+        rebuilt.extend(fitted.points)
+        cursor = max(cursor, fitted.after + 1)
     rebuilt.extend(points[cursor:])
     return rebuilt, failures
 
@@ -341,14 +358,15 @@ def _why_stuck(points: list[Point], start: int, end: int, minimum_m: float) -> s
 def _render(course: Course, points: list[Point]) -> str:
     """The original file with its point list replaced and <bounds> refreshed."""
     latlon = [course.to_latlon(p) for p in points]
+    tag = course.tag
     body = "\n".join(
-        f'    <trkpt lat="{lat:.9f}" lon="{lon:.9f}">\n        <ele>{p.ele:.1f}</ele>\n    </trkpt>'
+        f'    <{tag} lat="{lat:.9f}" lon="{lon:.9f}">\n        <ele>{p.ele:.1f}</ele>\n    </{tag}>'
         if p.ele is not None
-        else f'    <trkpt lat="{lat:.9f}" lon="{lon:.9f}"/>'
+        else f'    <{tag} lat="{lat:.9f}" lon="{lon:.9f}"/>'
         for (lat, lon), p in zip(latlon, points)
     )
-    head, _, rest = course.text.partition("<trkpt")
-    _, _, tail = rest.rpartition("</trkpt>")
+    head, _, rest = course.text.partition(f"<{tag}")
+    _, _, tail = rest.rpartition(f"</{tag}>")
     out = f"{head}{body.lstrip()}{tail}"
     lats = [lat for lat, _ in latlon]
     lons = [lon for _, lon in latlon]
