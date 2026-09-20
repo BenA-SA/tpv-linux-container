@@ -286,14 +286,16 @@ def _intersect(
     return Point(a.x + t * da[0], a.y + t * da[1], None)
 
 
-def widen(course: Course, radius_m: float, minimum_m: float) -> tuple[list[Point], list[str]]:
+def widen(
+    course: Course, radius_m: float, minimum_m: float
+) -> tuple[list[Point], list[str], int]:
     """Rebuild the course with each corner tighter than ``minimum_m`` replaced by an arc.
 
     Widening one corner can leave its new end points curving tighter than the
     threshold, so the sweep repeats until nothing is left to fix. Corners that no
     arc fits are reported once and then left alone, rather than retried forever.
     """
-    points, notes = course.points, []
+    points, notes, widened = course.points, [], 0
     stuck: set[tuple[float, float]] = set()
     for _ in range(MAX_PASSES):
         radii = Course.radii(_as_course(course, points))
@@ -301,8 +303,9 @@ def widen(course: Course, radius_m: float, minimum_m: float) -> tuple[list[Point
         if not groups:
             break
         points, failures = _apply_groups(points, groups, radius_m, minimum_m, stuck)
+        widened += len(groups) - len(failures)
         notes.extend(failures)
-    return points, notes
+    return points, notes, widened
 
 
 def _key(points: list[Point], group: tuple[int, int]) -> tuple[float, float]:
@@ -432,9 +435,9 @@ def main() -> int:
         print("nothing to fix")
         return 0
 
-    points, notes = widen(original, args.radius, args.minimum)
+    points, notes, widened = widen(original, args.radius, args.minimum)
     fixed = Course(_render(original, points))
-    print(f"\nwidened {len(tight) - len(notes)} of {len(tight)} corner(s) to {args.radius:g} m")
+    print(f"\nwidened {widened} corner(s) to {args.radius:g} m")
     for note in notes:
         print(f"  ! {note}", file=sys.stderr)
     remaining = report("fixed", fixed, args.minimum)
